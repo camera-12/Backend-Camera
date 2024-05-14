@@ -63,8 +63,17 @@ const userSchema = new mongoose.Schema({
       },
       price: {
         type: Number,
+        default: 0,
+      },
+      TotalPrice: {
+        type: Number,
+        default: 0,
       },
       Discount: {
+        type: Number,
+        default: 0,
+      },
+      TotalDiscount: {
         type: Number,
         default: 0,
       },
@@ -74,6 +83,7 @@ const userSchema = new mongoose.Schema({
       },
       Total: {
         type: Number,
+        default: 0,
       },
       quantity: {
         type: Number,
@@ -86,6 +96,7 @@ const userSchema = new mongoose.Schema({
   },
   TotalPrice: {
     type: Number,
+    default: 0,
   },
   TotalDiscount: {
     type: Number,
@@ -97,6 +108,7 @@ const userSchema = new mongoose.Schema({
   },
   TotalAll: {
     type: Number,
+    default: 0,
   },
 });
 

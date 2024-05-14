@@ -93,97 +93,277 @@ const AccountLogin = asyncWrapper(async (req, res, next) => {
   }
 });
 
+// Middleware to add an item to the user's cart
 const addtoCart = asyncWrapper(async (req, res, next) => {
-  const { userId, Frontcart, clearCart, removeItemId } = req.body;
+  const { userId, itemId, image, price, quantity, Discount, Tax } = req.body;
 
-  try {
-    // Find the user by userId
-    const user = await UserDB.findOne({ _id: userId });
-
-    if (!user) {
-      const err = appError.create("Invalid User", 400, httpStatusText.FAIL);
-      return next(err);
-    }
-
-    if (clearCart) {
-      // Clear the cart by emptying the cart array
-      user.cart = [];
-    } else if (removeItemId) {
-      // Remove the item with the specified itemId from the cart
-      const removedItem = user.cart.find(
-        (item) => item.itemId === removeItemId
-      );
-      if (removedItem) {
-        user.cart = user.cart.filter((item) => item.itemId !== removeItemId);
-        // Deduct removed item's price, discount, and tax from totals
-        user.TotalPrice -= removedItem.Total || 0;
-        user.TotalDiscount -= removedItem.Discount || 0;
-        user.TotalTax -= removedItem.Tax * removedItem.quantity || 0;
-        user.CartProductsCount -= removedItem.quantity || 0;
-        // Recalculate TotalAll
-        user.TotalAll = user.TotalPrice - user.TotalDiscount + user.TotalTax;
-      }
-    } else {
-      let existingCartItem = user.cart.find(
-        (item) => item.itemId === Frontcart.itemId
-      );
-
-      if (existingCartItem) {
-        // If the item exists, update its quantity
-        existingCartItem.quantity += Frontcart.quantity;
-      } else {
-        // If the item doesn't exist, add it to the cart
-        existingCartItem = {
-          itemId: Frontcart.itemId,
-          image: Frontcart.image,
-          price: Frontcart.price,
-          quantity: Frontcart.quantity,
-          Discount: Frontcart.Discount || 0,
-          Tax: Frontcart.Tax || 0,
-        };
-        user.cart.push(existingCartItem);
-      }
-
-      // Calculate total for the new/updated item
-      existingCartItem.Total =
-        existingCartItem.price * existingCartItem.quantity -
-        existingCartItem.Discount +
-        existingCartItem.Tax * existingCartItem.quantity;
-
-      // Update totals
-      user.TotalPrice = user.cart.reduce(
-        (total, item) => total + (item.Total || 0),
-        0
-      );
-      user.TotalDiscount = user.cart.reduce(
-        (total, item) => total + (item.Discount || 0),
-        0
-      );
-      user.TotalTax = user.cart.reduce(
-        (total, item) => total + (item.Tax * item.quantity || 0),
-        0
-      );
-      
-      user.CartProductsCount = new Set(
-        user.cart.map((item) => item.itemId)
-      ).size;
-
-      user.TotalAll = user.TotalPrice - user.TotalDiscount + user.TotalTax;
-    }
-
-    // Save the updated user
-    await user.save();
-
-    // Respond with success
-    res.status(200).json({ message: "Cart updated successfully" });
-  } catch (err) {
-    // Handle errors
-    next(err);
+  if (!userId || !itemId || !image || !price || !quantity) {
+    const err = appError.create(
+      "Missing required fields",
+      404,
+      httpStatusText.FAIL
+    );
+    return next(err);
   }
+
+  // Find the user by ID and update their cart
+  const user = await UserDB.findOne({ _id: userId });
+  if (!user) {
+    const err = appError.create("User not found", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  // Check if the item already exists in the cart
+  const existingItemIndex = user.cart.findIndex(
+    (item) => item.itemId === itemId
+  );
+
+  const totalPrice = +price * +quantity;
+  const totalDiscount = +Discount * +quantity;
+  const beforeTax = totalPrice - totalDiscount;
+  const afterTax = beforeTax * (1 + +Tax / 100);
+
+  if (existingItemIndex !== -1) {
+    // Item already exists, increment quantity
+    user.cart[existingItemIndex].quantity += quantity;
+    user.cart[existingItemIndex].image = image;
+    user.cart[existingItemIndex].price = price;
+    user.cart[existingItemIndex].TotalPrice =
+      price * user.cart[existingItemIndex].quantity;
+    user.cart[existingItemIndex].Discount = Discount;
+    user.cart[existingItemIndex].TotalDiscount =
+      Discount * user.cart[existingItemIndex].quantity;
+    user.cart[existingItemIndex].Tax = Tax;
+    // Recalculate total based on updated quantity, price, discount, and tax
+
+    const beforeTax =
+      +user.cart[existingItemIndex].TotalPrice -
+      +user.cart[existingItemIndex].TotalDiscount;
+    const afterTax = beforeTax * (1 + +Tax / 100);
+
+    user.cart[existingItemIndex].Total = afterTax;
+  } else {
+    // Item doesn't exist, add it to the cart
+    user.cart.push({
+      itemId,
+      image,
+      price,
+      quantity,
+      Discount,
+      Tax,
+      Total: afterTax,
+      TotalPrice: totalPrice,
+      TotalDiscount: totalDiscount,
+    });
+  }
+  user.CartProductsCount = user.cart.length;
+
+  user.TotalDiscount = 0;
+  user.TotalPrice = 0;
+  user.TotalTax = 0;
+  user.TotalAll = 0;
+  user.cart.forEach((item) => {
+    user.TotalDiscount += item.TotalDiscount;
+    user.TotalPrice += item.TotalPrice;
+    user.TotalTax += item.Tax;
+    user.TotalAll += item.Total;
+  });
+
+  await user.save();
+
+  res.status(201).json({ status: httpStatusText.SUCCESS, user });
+});
+
+// Middleware to clear the user's cart
+const clearCart = asyncWrapper(async (req, res, next) => {
+  const { userId } = req.body;
+  // Find the user by ID and clear their cart
+  const user = await UserDB.findById(userId);
+  if (!user) {
+    const err = appError.create("User not found", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  user.cart = [];
+  user.CartProductsCount = user.cart.length;
+  user.TotalDiscount = 0;
+  user.TotalPrice = 0;
+  user.TotalTax = 0;
+  user.TotalAll = 0;
+
+  await user.save();
+
+  res.status(201).json({ status: httpStatusText.SUCCESS, user });
+});
+
+// Middleware to remove an item from the user's cart
+const removeOneFromCart = asyncWrapper(async (req, res, next) => {
+  const { userId, itemId } = req.body;
+
+  // Find the user by ID and remove the item from their cart
+  const user = await UserDB.findById(userId);
+  if (!user) {
+    const err = appError.create("User not found", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  const existingItemIndex = user.cart.findIndex(
+    (item) => item.itemId === itemId
+  );
+  if (existingItemIndex === -1) {
+    const err = appError.create("Product not exist", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  if (user.cart[existingItemIndex].quantity > 1) {
+    user.cart[existingItemIndex].quantity -= 1;
+
+    user.cart[existingItemIndex].TotalPrice =
+      user.cart[existingItemIndex].price *
+      user.cart[existingItemIndex].quantity;
+
+    user.cart[existingItemIndex].TotalDiscount =
+      user.cart[existingItemIndex].Discount *
+      user.cart[existingItemIndex].quantity;
+    // Recalculate total based on updated quantity, price, discount, and tax
+
+    const beforeTax =
+      +user.cart[existingItemIndex].TotalPrice -
+      +user.cart[existingItemIndex].TotalDiscount;
+    const afterTax = beforeTax * (1 + user.cart[existingItemIndex].Tax / 100);
+
+    user.cart[existingItemIndex].Total = afterTax;
+  } else {
+    const err = appError.create(
+      "Can't Remove Product",
+      404,
+      httpStatusText.FAIL
+    );
+    return next(err);
+  }
+
+  user.CartProductsCount = user.cart.length;
+
+  user.TotalDiscount = 0;
+  user.TotalPrice = 0;
+  user.TotalTax = 0;
+  user.TotalAll = 0;
+  user.cart.forEach((item) => {
+    user.TotalDiscount += item.TotalDiscount;
+    user.TotalPrice += item.TotalPrice;
+    user.TotalTax += item.Tax;
+    user.TotalAll += item.Total;
+  });
+  await user.save();
+
+  res.status(201).json({ status: httpStatusText.SUCCESS, user });
+});
+
+const removeFromCart = asyncWrapper(async (req, res, next) => {
+  const { userId, itemId } = req.body;
+
+  // Find the user by ID and remove the item from their cart
+  const user = await UserDB.findById(userId);
+  if (!user) {
+    const err = appError.create("User not found", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  const existingItemIndex = user.cart.findIndex(
+    (item) => item.itemId === itemId
+  );
+  if (existingItemIndex === -1) {
+    const err = appError.create("Product not exist", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+  user.cart.splice(existingItemIndex, 1);
+
+  user.CartProductsCount = user.cart.length;
+
+  user.TotalDiscount = 0;
+  user.TotalPrice = 0;
+  user.TotalTax = 0;
+  user.TotalAll = 0;
+  user.cart.forEach((item) => {
+    user.TotalDiscount += item.TotalDiscount;
+    user.TotalPrice += item.TotalPrice;
+    user.TotalTax += item.Tax;
+    user.TotalAll += item.Total;
+  });
+  await user.save();
+
+  res.status(201).json({ status: httpStatusText.SUCCESS, user });
+});
+
+// Middleware to remove an item from the user's cart
+const changeQuantity = asyncWrapper(async (req, res, next) => {
+  const { userId, itemId, quantity } = req.body;
+
+  // Find the user by ID and remove the item from their cart
+  const user = await UserDB.findById(userId);
+  if (!user) {
+    const err = appError.create("User not found", 404, httpStatusText.FAIL);
+    return next(err);
+  }
+
+  // Find the index of the item in the cart
+  const itemIndex = user.cart.findIndex((item) => item.itemId === itemId);
+
+  // If item not found, return error
+  if (itemIndex === -1) {
+    const err = appError.create(
+      "Item not found in cart",
+      404,
+      httpStatusText.FAIL
+    );
+    return next(err);
+  }
+
+  // Update the quantity of the item
+  if (quantity > 0) {
+    user.cart[itemIndex].quantity = quantity;
+
+    user.cart[itemIndex].TotalPrice = user.cart[itemIndex].price * quantity;
+
+    user.cart[itemIndex].TotalDiscount =
+      user.cart[itemIndex].Discount * user.cart[itemIndex].quantity;
+    // Recalculate total based on updated quantity, price, discount, and tax
+
+    const beforeTax =
+      +user.cart[itemIndex].TotalPrice - +user.cart[itemIndex].TotalDiscount;
+    const afterTax = beforeTax * (1 + user.cart[itemIndex].Tax / 100);
+
+    user.cart[itemIndex].Total = afterTax;
+  } else {
+    const err = appError.create(
+      "Quantity Not allowed",
+      400,
+      httpStatusText.ERROR
+    );
+    return next(err);
+  }
+
+  user.TotalDiscount = 0;
+  user.TotalPrice = 0;
+  user.TotalTax = 0;
+  user.TotalAll = 0;
+  user.cart.forEach((item) => {
+    user.TotalDiscount += item.TotalDiscount;
+    user.TotalPrice += item.TotalPrice;
+    user.TotalTax += item.Tax;
+    user.TotalAll += item.Total;
+  });
+  await user.save();
+
+  res.status(201).json({ status: httpStatusText.SUCCESS, user });
 });
 
 module.exports = {
   AccountRegister,
   AccountLogin,
   addtoCart,
+  clearCart,
+  removeFromCart,
+  removeOneFromCart,
+  changeQuantity,
 };
