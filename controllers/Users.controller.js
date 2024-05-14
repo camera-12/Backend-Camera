@@ -110,10 +110,21 @@ const addtoCart = asyncWrapper(async (req, res, next) => {
       user.cart = [];
     } else if (removeItemId) {
       // Remove the item with the specified itemId from the cart
-      user.cart = user.cart.filter((item) => item.itemId !== removeItemId);
+      const removedItem = user.cart.find(
+        (item) => item.itemId === removeItemId
+      );
+      if (removedItem) {
+        user.cart = user.cart.filter((item) => item.itemId !== removeItemId);
+        // Deduct removed item's price, discount, and tax from totals
+        user.TotalPrice -= removedItem.Total || 0;
+        user.TotalDiscount -= removedItem.Discount || 0;
+        user.TotalTax -= removedItem.Tax * removedItem.quantity || 0;
+        user.CartProductsCount -= removedItem.quantity || 0;
+        // Recalculate TotalAll
+        user.TotalAll = user.TotalPrice - user.TotalDiscount + user.TotalTax;
+      }
     } else {
-      // Check if the item already exists in the cart
-      const existingCartItem = user.cart.find(
+      let existingCartItem = user.cart.find(
         (item) => item.itemId === Frontcart.itemId
       );
 
@@ -122,27 +133,52 @@ const addtoCart = asyncWrapper(async (req, res, next) => {
         existingCartItem.quantity += Frontcart.quantity;
       } else {
         // If the item doesn't exist, add it to the cart
-        user.cart.push({
+        existingCartItem = {
           itemId: Frontcart.itemId,
           image: Frontcart.image,
           price: Frontcart.price,
           quantity: Frontcart.quantity,
-        });
+          Discount: Frontcart.Discount || 0,
+          Tax: Frontcart.Tax || 0,
+        };
+        user.cart.push(existingCartItem);
       }
+
+      // Calculate total for the new/updated item
+      existingCartItem.Total =
+        existingCartItem.price * existingCartItem.quantity -
+        existingCartItem.Discount +
+        existingCartItem.Tax * existingCartItem.quantity;
+
+      // Update totals
+      user.TotalPrice = user.cart.reduce(
+        (total, item) => total + (item.Total || 0),
+        0
+      );
+      user.TotalDiscount = user.cart.reduce(
+        (total, item) => total + (item.Discount || 0),
+        0
+      );
+      user.TotalTax = user.cart.reduce(
+        (total, item) => total + (item.Tax * item.quantity || 0),
+        0
+      );
+      
+      user.CartProductsCount = new Set(
+        user.cart.map((item) => item.itemId)
+      ).size;
+
+      user.TotalAll = user.TotalPrice - user.TotalDiscount + user.TotalTax;
     }
 
     // Save the updated user
     await user.save();
 
-    // Respond with success and the updated user object
-    res.status(201).json({ status: httpStatusText.SUCCESS, user });
-  } catch (error) {
-    const err = appError.create(
-      "Internal server error",
-      500,
-      httpStatusText.ERROR
-    );
-    return next(err);
+    // Respond with success
+    res.status(200).json({ message: "Cart updated successfully" });
+  } catch (err) {
+    // Handle errors
+    next(err);
   }
 });
 

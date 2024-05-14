@@ -64,12 +64,40 @@ const userSchema = new mongoose.Schema({
       price: {
         type: Number,
       },
+      Discount: {
+        type: Number,
+        default: 0,
+      },
+      Tax: {
+        type: Number,
+        default: 0,
+      },
+      Total: {
+        type: Number,
+      },
       quantity: {
         type: Number,
         default: 1, // Default quantity is 1, can be adjusted as needed
       },
     },
   ],
+  CartProductsCount: {
+    type: Number,
+  },
+  TotalPrice: {
+    type: Number,
+  },
+  TotalDiscount: {
+    type: Number,
+    default: 0,
+  },
+  TotalTax: {
+    type: Number,
+    default: 0,
+  },
+  TotalAll: {
+    type: Number,
+  },
 });
 
 module.exports = mongoose.model("User", userSchema);
